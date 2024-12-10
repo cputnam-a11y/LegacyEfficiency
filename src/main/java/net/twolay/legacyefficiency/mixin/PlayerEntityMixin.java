@@ -1,16 +1,18 @@
 package net.twolay.legacyefficiency.mixin;
 
+import net.minecraft.block.BlockState;
 import net.minecraft.enchantment.EnchantmentHelper;
-import net.minecraft.entity.effect.StatusEffects;
+import net.minecraft.enchantment.Enchantments;
 import net.minecraft.entity.EntityType;
+import net.minecraft.entity.EquipmentSlot;
 import net.minecraft.entity.LivingEntity;
+import net.minecraft.entity.effect.StatusEffects;
 import net.minecraft.entity.player.PlayerEntity;
 import net.minecraft.entity.player.PlayerInventory;
 import net.minecraft.item.ItemStack;
-import net.minecraft.world.World;
-import net.minecraft.block.BlockState;
+import net.minecraft.registry.RegistryKeys;
 import net.minecraft.registry.tag.FluidTags;
-
+import net.minecraft.world.World;
 import org.spongepowered.asm.mixin.Final;
 import org.spongepowered.asm.mixin.Mixin;
 import org.spongepowered.asm.mixin.Overwrite;
@@ -20,7 +22,12 @@ import java.util.Objects;
 
 @Mixin(PlayerEntity.class)
 public abstract class PlayerEntityMixin extends LivingEntity {
-    @Final @Shadow PlayerInventory inventory;
+    @Final
+    @Shadow
+    PlayerInventory inventory;
+
+    @Shadow
+    public abstract ItemStack getEquippedStack(EquipmentSlot slot);
 
     protected PlayerEntityMixin(EntityType<? extends LivingEntity> entityType, World world) {
         super(entityType, world);
@@ -35,8 +42,18 @@ public abstract class PlayerEntityMixin extends LivingEntity {
     @Overwrite
     public float getBlockBreakingSpeed(BlockState block) {
         float speed = this.inventory.getBlockBreakingSpeed(block);
-        int efficiencyLevel = EnchantmentHelper.getEfficiency(this);
+
         ItemStack heldItem = this.getMainHandStack();
+        int efficiencyLevel = this.getRegistryManager()
+                .getOptional(RegistryKeys.ENCHANTMENT)
+                .map(r -> r.getEntry(Enchantments.EFFICIENCY))
+                .map(optionalEfficiency ->
+                        optionalEfficiency.map(
+                                efficiency -> EnchantmentHelper.getLevel(efficiency, heldItem)
+                        ).orElse(0)
+                )
+                .orElse(0);
+        ;
 
         if (efficiencyLevel > 0 && !heldItem.isEmpty()) {
             speed += (float) (efficiencyLevel * efficiencyLevel + 1);
@@ -53,7 +70,15 @@ public abstract class PlayerEntityMixin extends LivingEntity {
             };
             speed *= fatigueMultiplier;
         }
-        if (this.isSubmergedIn(FluidTags.WATER) && !EnchantmentHelper.hasAquaAffinity(this)) {
+
+        if (this.isSubmergedIn(FluidTags.WATER) && this.getRegistryManager().getOptional(RegistryKeys.ENCHANTMENT)
+                .map(
+                        r -> r.getEntry(Enchantments.AQUA_AFFINITY)
+                ).map(
+                        optionalAquaAffinity -> optionalAquaAffinity.map(
+                                aquaAffinity -> EnchantmentHelper.getLevel(aquaAffinity, this.getEquippedStack(EquipmentSlot.HEAD))
+                        ).orElse(0)
+                ).orElse(0) > 0) {
             speed /= 5.0f;
         }
         if (!this.isOnGround()) {
